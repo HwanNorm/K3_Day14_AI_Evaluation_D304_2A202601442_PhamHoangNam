@@ -266,6 +266,44 @@ class OpenAIGenerator:
         return answer
 
 
+class OpenRouterGenerator:
+    """Generator backed by OpenRouter's OpenAI-compatible chat endpoint."""
+
+    def __init__(self, max_output_tokens: int = 300) -> None:
+        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        self.model = os.getenv("OPENROUTER_MODEL", "").strip()
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is missing from .env")
+        if not self.model:
+            raise RuntimeError("OPENROUTER_MODEL is missing from .env")
+        self.client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+        self.max_output_tokens = max_output_tokens
+
+    def generate(self, prompt: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=self.max_output_tokens,
+        )
+        choice = response.choices[0] if response.choices else None
+        answer = (choice.message.content or "").strip() if choice else ""
+        if not answer:
+            raise RuntimeError("OpenRouter returned an empty answer")
+        return answer
+
+
+def _default_generator() -> TextGenerator:
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    if provider == "openrouter":
+        return OpenRouterGenerator()
+    if provider == "openai":
+        return OpenAIGenerator()
+    raise RuntimeError(
+        f"Unknown LLM_PROVIDER {provider!r}; expected 'openai' or 'openrouter'"
+    )
+
+
 @dataclass(frozen=True)
 class DomainResponse:
     question: str
@@ -299,7 +337,7 @@ class DomainAssistant:
         return cls(
             corpus_id,
             BM25Retriever(chunks),
-            generator if generator is not None else OpenAIGenerator(),
+            generator if generator is not None else _default_generator(),
             top_k,
         )
 
